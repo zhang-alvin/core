@@ -50,6 +50,7 @@ void initReader(Reader* r, apf::Mesh2* m, const char* filename)
   r->line = static_cast<char*>(malloc(1));
   r->line[0] = '\0';
   r->linecap = 1;
+  m->createLongTag("GMSH",1);
 }
 
 void freeReader(Reader* r)
@@ -137,7 +138,8 @@ void readElement(Reader* r)
   int dim = apf::Mesh::typeDimension[apfType];
   long ntags = getLong(r);
   PCU_ALWAYS_ASSERT(ntags >= 2);
-  getLong(r); /* discard physical type */
+  long physicalTag = getLong(r); /* discard physical type */
+  apf::MeshTag* gmshPhysicalTags = r->mesh->findTag("GMSH");
   long gtag = getLong(r);
   for (long i = 2; i < ntags; ++i)
     getLong(r); /* discard all other element tags */
@@ -150,7 +152,11 @@ void readElement(Reader* r)
   if (dim != 0) {
     if (dim > r->mesh->getDimension())
       apf::changeMdsDimension(r->mesh, dim); 
-    apf::buildElement(r->mesh, g, apfType, verts);
+    apf::MeshEntity* newEnt = apf::buildElement(r->mesh, g, apfType, verts);
+    r->mesh->setLongTag(newEnt,gmshPhysicalTags,&physicalTag);
+  }
+  else{
+    r->mesh->setLongTag(verts[0],gmshPhysicalTags,&physicalTag);
   }
   getLine(r);
 }
