@@ -47,6 +47,11 @@ typedef std::map<int, MeshEntity*> GlobalToVert;
 void construct(Mesh2* m, const int* conn, int nelem, int etype,
     GlobalToVert& globalToVert);
 
+void construct(Mesh2* m, const int* conn, const int* conn_b, int nelem,
+    int nelem_b, int etype, int etype_b,
+    GlobalToVert& globalToVert);
+
+
 /** \brief Assign coordinates to the mesh
   * \details
   * Each peer provides a set of the coordinates. The coords most be ordered

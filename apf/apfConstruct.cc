@@ -20,6 +20,20 @@ static void constructVerts(
       result[conn[i]] = m->createVert_(interior);
 }
 
+static void constructBoundaryElements(
+    Mesh2* m, const Gid* conn_b, int nelem_b, int etype_b,
+    GlobalToVert& globalToVert)
+{
+  ModelEntity* interior = m->findModelEntity(m->getDimension(), 0);
+  int nev = apf::Mesh::adjacentCount[etype_b][0];
+  for (int i = 0; i < nelem_b; ++i) {
+    Downward verts;
+    int offset = i * nev;
+    for (int j = 0; j < nev; ++j)
+      verts[j] = globalToVert[conn_b[j + offset]];
+    m->createEntity(etype_b,interior,verts);
+  }
+}
 static void constructElements(
     Mesh2* m, const Gid* conn, int nelem, int etype,
     GlobalToVert& globalToVert)
@@ -154,6 +168,20 @@ void construct(Mesh2* m, const int* conn, int nelem, int etype,
   stitchMesh(m);
   m->acceptChanges();
 }
+
+void construct(Mesh2* m, const int* conn, const int* conn_b, int nelem, 
+    int nelem_b, int etype, int etype_b,
+    GlobalToVert& globalToVert)
+{
+  constructVerts(m, conn, nelem, etype, globalToVert);
+  constructBoundaryElements(m, conn_b, nelem_b, etype_b, globalToVert);
+  constructElements(m, conn, nelem, etype, globalToVert);
+  constructResidence(m, globalToVert);
+  constructRemotes(m, globalToVert);
+  stitchMesh(m);
+  m->acceptChanges();
+}
+
 
 void setCoords(Mesh2* m, const double* coords, int nverts,
     GlobalToVert& globalToVert)
