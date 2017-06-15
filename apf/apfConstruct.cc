@@ -20,6 +20,20 @@ static void constructVerts(
       result[conn[i]] = m->createVert_(interior);
 }
 
+static void constructVerts(
+    Mesh2* m, int nverts,
+    int* local2globalMap,
+    GlobalToVert& result)
+{
+  ModelEntity* interior = m->findModelEntity(m->getDimension(), 0);
+  //for (int i = 0; i < nverts; ++i)
+  //  createdVerts[i] = m->createVert_(interior);
+    //result[i] = m->createVert_(interior);
+  for (int i = 0; i < nverts; ++i)
+    result[local2globalMap[i]] = m->createVert_(interior);
+}
+
+
 static void constructBoundaryElements(
     Mesh2* m, const Gid* conn_b, int nelem_b, int etype_b,
     GlobalToVert& globalToVert)
@@ -170,10 +184,10 @@ void construct(Mesh2* m, const int* conn, int nelem, int etype,
 }
 
 void construct(Mesh2* m, const int* conn, const int* conn_b, int nelem, 
-    int nelem_b, int etype, int etype_b,
+    int nelem_b, int nverts,int etype, int etype_b, int* local2globalMap,
     GlobalToVert& globalToVert)
 {
-  constructVerts(m, conn, nelem, etype, globalToVert);
+  constructVerts(m, nverts,local2globalMap,globalToVert);
   constructBoundaryElements(m, conn_b, nelem_b, etype_b, globalToVert);
   constructElements(m, conn, nelem, etype, globalToVert);
   constructResidence(m, globalToVert);

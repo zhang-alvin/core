@@ -48,7 +48,7 @@ void construct(Mesh2* m, const int* conn, int nelem, int etype,
     GlobalToVert& globalToVert);
 
 void construct(Mesh2* m, const int* conn, const int* conn_b, int nelem,
-    int nelem_b, int etype, int etype_b,
+    int nelem_b, int nverts, int etype, int etype_b, int* local2globalMap,
     GlobalToVert& globalToVert);
 
 
