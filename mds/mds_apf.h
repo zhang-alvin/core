@@ -67,6 +67,10 @@ struct mds_apf* mds_read_smb(struct gmi_model* model, const char* pathname,
 struct mds_apf* mds_write_smb(struct mds_apf* m, const char* pathname,
     int ignore_peers, void* apf_mesh);
 
+struct mds_apf* mds_write_smb_direct(struct mds_apf* m, const char* pathname,
+    int ignore_peers, void* apf_mesh);
+
+
 void mds_verify(struct mds_apf* m);
 void mds_verify_residence(struct mds_apf* m, mds_id e);
 
