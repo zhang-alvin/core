@@ -331,6 +331,8 @@ class Mesh
     virtual int getId() = 0;
     /** \brief write the underlying mesh into a set of files */
     virtual void writeNative(const char* fileName) = 0;
+    /** \brief write the underlying mesh into a set of files without reordering*/
+    virtual void writeNative_direct(const char* fileName) = 0;
     /** \brief actually destroy the underlying mesh data structure */
     virtual void destroyNative() = 0;
     /** \brief run a set of consistency checks on the underlying
