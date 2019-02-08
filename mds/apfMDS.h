@@ -42,6 +42,9 @@ class MeshTag;
 class MeshEntity;
 class Migration;
 
+/** \brief a map from global ids to vertex objects */
+typedef std::map<int, MeshEntity*> GlobalToVert;
+
 /** \brief create an empty MDS part
   \param model the geometric model interface
   \param dim the eventual mesh dimension. MDS needs to allocate
@@ -49,8 +52,14 @@ class Migration;
   \param isMatched whether or not there will be matched entities */
 Mesh2* makeEmptyMdsMesh(gmi_model* model, int dim, bool isMatched);
 
-/** \brief a map from global ids to vertex objects */
-typedef std::map<int, MeshEntity*> GlobalToVert;
+/** \brief load an MDS mesh and model from file
+  \param modelfile will be passed to gmi_load to get the model
+  \note gmi_register_mesh and gmi_register_null need to be
+        called before this function. Also, gmi_register_sim
+        may also be called to enable loading of GeomSim, 
+        Parasolid, and ACIS models
+  */
+Mesh2* loadMdsMesh(const char* modelfile, const char* meshfile);
 
 /** \brief load an MDS mesh from files
   \param model the geometric model interface
@@ -67,14 +76,16 @@ typedef std::map<int, MeshEntity*> GlobalToVert;
                   resulting object will do the same in reverse. */
 Mesh2* loadMdsMesh(gmi_model* model, const char* meshfile);
 
-/** \brief load an MDS mesh and model from file
-  \param modelfile will be passed to gmi_load to get the model */
-Mesh2* loadMdsMesh(const char* modelfile, const char* meshfile);
+// make a serial mesh on all processes - no pmodel & remote link setup
+Mesh2* loadSerialMdsMesh(gmi_model* model, const char* meshfile);
 
 /** \brief create an MDS mesh from an existing mesh
   \param from the mesh to copy
+  \param reorder if true reorder mesh vertices and elements 
+         (start from a vertex with minimum Y)
+  \param copy_data if true (default), copy Fields/Numberings/Tags
   \details this function uses apf::convert to copy any apf::Mesh */
-Mesh2* createMdsMesh(gmi_model* model, Mesh* from);
+Mesh2* createMdsMesh(gmi_model* model, Mesh* from, bool reorder=false, bool copy_data=true);
 
 /** \brief apply adjacency-based reordering
   \param t Optional user-defined ordering of the vertices.
@@ -113,6 +124,9 @@ void deriveMdsModel(Mesh2* in);
  *  \details Only for tetrahedral mesh with single model region.
  *  The tags provided for face classification are treated as reserved,
  *  and all newly generated tags are distinct regardless of dimension.
+ *  It is assumed that the mesh was created using apf::construct, which
+ *  by default assigns a tag 0 to the model region. Due to this, it is
+ *  advised to provide face tags starting from 1 if uniqueness is desired.
  *  It is assumed that both mesh vertices are indexed from 0 to
  *  (n_verts - 1) and mesh regions from 0 to (n_regions -1).
  *
@@ -131,6 +145,31 @@ void deriveMdlFromManifold(Mesh2* mesh, bool* isModelVert,
 			   int nBFaces, int (*bFaces)[5],
 			   GlobalToVert &globalToVert,
 			   std::map<int, apf::MeshEntity*> &globalToRegion);
+
+/** \brief Given the mesh vertices that are also model vertices, and the
+ *  classification on boundary mesh edges, constructs the classification
+ *  on the rest of the boundary entities for a 2-D mesh.
+ *
+ *  \details Only for triangular mesh with single model region.
+ *  The tags provided for edge classification are treated as reserved,
+ *  and all newly generated tags are distinct regardless of dimension.
+ *  It is assumed that both mesh vertices are indexed from 0 to
+ *  (n_verts - 1) and mesh faces from 0 to (n_faces -1).
+ *
+ *  \param mesh: The mesh in consideration
+ *  \param isModelVert Array of bools, one per mesh vertex, telling if that
+ *         vertex is also a model vertex
+ *  \param nBEdges number of boundary faces
+ *  \param bEdges 2D Array of size (nBEdges x 4). For each face, the row is
+ *         [model_edge_tag, adj_face_tag, global_vtx_id_1, global_vtx_id_2]
+ *  \param globalToVert Maps mesh vertex ID to the mesh vertex. Typically
+ *         output from apf::construct
+ *  \param globalToFace Maps mesh face ID to the mesh face
+ */
+void derive2DMdlFromManifold(Mesh2* mesh, bool* isModelVert,
+			     int nBEdges, int (*bEdges)[4],
+			     GlobalToVert &globalToVert,
+			     std::map<int, apf::MeshEntity*> &globalToFace);
 
 /** \brief change the dimension of an MDS mesh
   \details this should be called before adding entities of

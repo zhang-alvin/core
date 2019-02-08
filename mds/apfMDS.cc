@@ -9,6 +9,7 @@
 *******************************************************************************/
 
 #include <PCU.h>
+#include <lionPrint.h>
 #include "apfMDS.h"
 #include "mds_apf.h"
 #include "apfPM.h"
@@ -23,6 +24,7 @@
 #include <cstdlib>
 #include <stdint.h>
 #include <limits>
+#include <deque>
 
 extern "C" {
 
@@ -53,7 +55,7 @@ static int getFaceIdInRegion(apf::Mesh* mesh, apf::MeshEntity* region,
                       int* bface_data)
 {
   apf::Downward verts;
-  apf::MeshTag* vIDTag = mesh->findTag("vert_id");
+  apf::MeshTag* vIDTag = mesh->findTag("_vert_id");
   int vID;
   mesh->getDownward(region, 0, verts);
   // Go through all vertices. What vertex is not on the face can be used to determine the face id.
@@ -70,6 +72,26 @@ static int getFaceIdInRegion(apf::Mesh* mesh, apf::MeshEntity* region,
   mesh->getIntTag(verts[3], vIDTag, &vID);
   if (vID != bface_data[2] && vID != bface_data[3] && vID != bface_data[4])
     return 0;
+  return 12; // Should give segmentation fault
+}
+
+static int getEdgeIdInFace(apf::Mesh* mesh, apf::MeshEntity* face,
+                      int* bedge_data)
+{
+  apf::Downward verts, edges;
+  apf::MeshTag* vIDTag = mesh->findTag("_vert_id");
+  int vID[2], eID;
+  mesh->getDownward(face, 1, edges);
+  for (eID = 0; eID < 3; ++eID) {
+    mesh->getDownward(edges[eID], 0, verts);
+    mesh->getIntTag(verts[0], vIDTag, &vID[0]);
+    mesh->getIntTag(verts[1], vIDTag, &vID[1]);
+    if((vID[0] == bedge_data[2] && vID[1] == bedge_data[3]) ||
+       (vID[0] == bedge_data[3] && vID[1] == bedge_data[2])) {
+      return eID;
+    }
+  }
+
   return 12; // Should give segmentation fault
 }
 
@@ -153,7 +175,8 @@ class MeshMDS : public Mesh2
       isMatched = isMatched_;
       ownsModel = true;
     }
-    MeshMDS(gmi_model* m, Mesh* from)
+    MeshMDS(gmi_model* m, Mesh* from, 
+            apf::MeshEntity** nodes, apf::MeshEntity** elems, bool copy_data=true)
     {
       init(apf::getLagrange(1));
       mds_id cap[MDS_TYPES];
@@ -169,8 +192,9 @@ class MeshMDS : public Mesh2
       mesh = mds_apf_create(m,d,cap);
       isMatched = from->hasMatching();
       ownsModel = true;
-      apf::convert(from,this);
+      apf::convert(from, this, nodes, elems, copy_data);
     }
+
     MeshMDS(gmi_model* m, const char* pathname)
     {
       init(apf::getLagrange(1));
@@ -212,10 +236,12 @@ class MeshMDS : public Mesh2
       toIter(id,it);
       return e;
     }
+
     void end(MeshIterator* it)
     {
       freeIter(it);
     }
+
     // return true if adjacency *from_dim <--> to_dim*  is stored
     bool hasAdjacency(int from_dim, int to_dim)
     {
@@ -422,7 +448,7 @@ class MeshMDS : public Mesh2
     void getTag(MeshEntity* e, MeshTag* t, void* data)
     {
       if (!hasTag(e,t)) {
-        fprintf(stderr, "expected tag \"%s\" on entity type %d\n",
+        lion_eprint(1, "expected tag \"%s\" on entity type %d\n",
             getTagName(t), getType(e));
         abort();
       }
@@ -539,8 +565,9 @@ class MeshMDS : public Mesh2
     }
     void acceptChanges()
     {
-      updateOwners(this, parts);
+      updateOwners(this, pmodel);
     }
+
     void migrate(Migration* plan)
     {
       apf::migrate(this,plan);
@@ -555,7 +582,7 @@ class MeshMDS : public Mesh2
       mesh = mds_write_smb(mesh, fileName, 0, this);
       double t1 = PCU_Time();
       if (!PCU_Comm_Self())
-        printf("mesh %s written in %f seconds\n", fileName, t1 - t0);
+        lion_oprint(1,"mesh %s written in %f seconds\n", fileName, t1 - t0);
     }
     void destroyNative()
     {
@@ -609,14 +636,14 @@ class MeshMDS : public Mesh2
     void setResidence(MeshEntity* e, Parts& residence)
     {
       mds_id id = fromEnt(e);
-      PME* p = getPME(parts, residence);
+      PME* p = getPME(pmodel, residence);
       void* vp = static_cast<void*>(p);
       void* ovp = mds_get_part(mesh, id);
       if (ovp) { /* partition model classification can be NULL during
         early mesh initialization, such as after reading SMB or in
         createEntity_ */
         PME* op = static_cast<PME*>(ovp);
-        putPME(parts, op);
+        putPME(pmodel, op);
       }
       mds_set_part(mesh, id, vp);
     }
@@ -642,9 +669,9 @@ class MeshMDS : public Mesh2
       int t = apf2mds(type);
       int dim = mds_dim[t];
       if (dim > mesh->mds.d) {
-        fprintf(stderr,"error: creating entity of dimension %d "
+        lion_eprint(1,"error: creating entity of dimension %d "
                        "in mesh of dimension %d\n", dim, mesh->mds.d);
-        fprintf(stderr,"please use apf::changeMdsDimension\n");
+        lion_eprint(1,"please use apf::changeMdsDimension\n");
         abort();
       }
       mds_set s;
@@ -665,10 +692,14 @@ class MeshMDS : public Mesh2
     {
       mds_id id = fromEnt(e);
       void* ovp = mds_get_part(mesh, id);
-      PME* op = static_cast<PME*>(ovp);
-      putPME(parts, op);
+      if (ovp)
+      {
+        PME* op = static_cast<PME*>(ovp);
+        putPME(pmodel, op);
+      }
       mds_apf_destroy_entity(mesh,id);
     }
+
     void setModelEntity(MeshEntity* e, ModelEntity* c)
     {
       mds_apf_set_model(mesh, fromEnt(e),
@@ -729,7 +760,7 @@ class MeshMDS : public Mesh2
       return table[type];
     }
     mds_apf* mesh;
-    PM parts;
+    PM pmodel;
     bool isMatched;
     bool ownsModel;
 };
@@ -741,9 +772,147 @@ Mesh2* makeEmptyMdsMesh(gmi_model* model, int dim, bool isMatched)
   return m;
 }
 
-Mesh2* createMdsMesh(gmi_model* model, Mesh* from)
+// seol -- reorder input mesh before conversion
+//         starting vtx: a vtx with min Y
+struct Queue {
+  bool has(apf::MeshEntity* e) { return h.count(e); }
+  void push(apf::MeshEntity* e)
+  {
+    q.push_back(e);
+    h.insert(e);
+  }
+  void pushVector(std::vector<apf::MeshEntity*> const& l)
+  {
+    for (size_t i = 0; i < l.size(); ++i)
+      push(l[i]);
+  }
+  apf::MeshEntity* pop()
+  {
+    apf::MeshEntity* e;
+    e = q.front();
+    q.pop_front();
+    h.erase(e);
+    return e;
+  }
+  bool empty() { return q.empty(); }
+  std::deque<apf::MeshEntity*> q;
+  std::set<apf::MeshEntity*> h;
+};
+
+int classifDim(gmi_model* model, Mesh* m, apf::MeshEntity* e)
 {
-  return new MeshMDS(model, from);
+  gmi_ent* clas=(gmi_ent*)m->toModel(e);
+  return gmi_dim(model, clas);
+}
+
+apf::MeshEntity* findFirst(apf::Mesh* m)
+{
+  apf::MeshEntity* v;
+  apf::MeshEntity* best;
+  apf::MeshIterator* it = m->begin(0);
+  best = m->iterate(it);
+  Vector3 coord;
+  m->getPoint(best, 0, coord);
+  double min_Y=coord[1];
+  while ((v = m->iterate(it)))
+  {
+    m->getPoint(v, 0, coord);  
+    if (min_Y > coord[1])
+    {
+      best = v;
+      min_Y = coord[1];
+    }
+  }
+  m->end(it);
+  return best;
+}
+
+bool visited(Queue& q, apf::Numbering* nn, MeshEntity* e)
+{
+  return apf::isNumbered(nn, e, 0, 0) || q.has(e);
+}
+
+bool hasNode(Mesh* m, MeshEntity* e)
+{
+  if (m->getShape()->countNodesOn(m->getType(e))>0) 
+    return true;
+  return false;
+}
+
+Mesh2* createMdsMesh(gmi_model* model, Mesh* from, bool reorder, bool copy_data)
+{
+  if (!reorder)
+    return new MeshMDS(model, from, NULL, NULL, copy_data);
+
+  int mesh_dim = from->getDimension();
+
+  // reorder and create mesh
+  apf::Numbering* nn = apf::createNumbering(from, "node", getConstant(0), 1);
+  apf::Numbering* en = apf::createNumbering(from, "elem", getConstant(mesh_dim), 1);
+
+  Queue q;
+  q.push(findFirst(from));
+
+  // node and element number starts from 0
+  int labelnode = 0;
+  int labelelem = 0;
+
+  std::vector<MeshEntity*> node_arr;
+  std::vector<MeshEntity*> elem_arr;
+
+  node_arr.resize(from->count(0)+1);
+  elem_arr.resize(from->count(mesh_dim)+1);
+
+  MeshEntity* otherVtx;
+  MeshEntity* edge;
+  MeshEntity* elem;
+
+  while (!q.empty()) 
+  {
+    MeshEntity* vtx = q.pop();
+    if (!apf::isNumbered(nn, vtx, 0, 0))
+    {
+      node_arr[labelnode] = vtx;
+      apf::number(nn, vtx, 0, 0, labelnode);
+
+      ++labelnode;
+    }
+
+    std::vector<MeshEntity*> entities;
+    apf::Adjacent edges;
+    from->getAdjacent(vtx,1, edges);
+    for (size_t i = 0; i < edges.getSize(); ++i) 
+    {
+      edge = edges[i];
+      apf::Adjacent adjacent;
+      from->getAdjacent(edge, mesh_dim, adjacent);      
+      for (size_t j = 0; j < adjacent.getSize(); ++j) 
+      {
+        elem = adjacent[j];
+        if (!apf::isNumbered(en, elem, 0, 0))
+        {
+          elem_arr[labelelem] = elem;
+          apf::number(en, elem, 0, 0, labelelem);
+          ++labelelem;
+        }
+      }
+      otherVtx = apf::getEdgeVertOppositeVert(from, edge, vtx);
+      if (!visited(q, nn, otherVtx))
+        entities.push_back(otherVtx);
+    }
+    q.pushVector(entities);
+  } // while
+
+  destroyNumbering(nn);
+  destroyNumbering(en);
+
+  return new MeshMDS(model, from, &(node_arr[0]), &(elem_arr[0]), copy_data);
+}
+
+Mesh2* loadSerialMdsMesh(gmi_model* model, const char* meshfile)
+{
+  Mesh2* m = new MeshMDS(model, meshfile);
+  return m;
 }
 
 Mesh2* loadMdsMesh(gmi_model* model, const char* meshfile)
@@ -753,9 +922,9 @@ Mesh2* loadMdsMesh(gmi_model* model, const char* meshfile)
   initResidence(m, m->getDimension());
   stitchMesh(m);
   m->acceptChanges();
-  double t1 = PCU_Time();
+
   if (!PCU_Comm_Self())
-    printf("mesh %s loaded in %f seconds\n", meshfile, t1 - t0);
+    lion_oprint(1,"mesh %s loaded in %f seconds\n", meshfile, PCU_Time() - t0);
   printStats(m);
   warnAboutEmptyParts(m);
   return m;
@@ -766,9 +935,9 @@ Mesh2* loadMdsMesh(const char* modelfile, const char* meshfile)
   double t0 = PCU_Time();
   static gmi_model* model;
   model = gmi_load(modelfile);
-  double t1 = PCU_Time();
   if (!PCU_Comm_Self())
-    printf("model %s loaded in %f seconds\n", modelfile, t1 - t0);
+    lion_oprint(1,"model %s loaded in %f seconds\n", modelfile, PCU_Time() - t0);
+
   return loadMdsMesh(model, meshfile);
 }
 
@@ -785,7 +954,7 @@ void reorderMdsMesh(Mesh2* mesh, MeshTag* t)
   }
   m->mesh = mds_reorder(m->mesh, 0, vert_nums);
   if (!PCU_Comm_Self())
-    printf("mesh reordered in %f seconds\n", PCU_Time()-t0);
+    lion_oprint(1,"mesh reordered in %f seconds\n", PCU_Time()-t0);
 }
 
 Mesh2* expandMdsMesh(Mesh2* m, gmi_model* g, int inputPartCount)
@@ -820,7 +989,7 @@ Mesh2* expandMdsMesh(Mesh2* m, gmi_model* g, int inputPartCount)
   apf::remapPartition(m, expand);
   double t1 = PCU_Time();
   if (!PCU_Comm_Self())
-    printf("mesh expanded from %d to %d parts in %f seconds\n",
+    lion_oprint(1,"mesh expanded from %d to %d parts in %f seconds\n",
         inputPartCount, outputPartCount, t1 - t0);
   return m;
 }
@@ -835,7 +1004,7 @@ Mesh2* repeatMdsMesh(Mesh2* m, gmi_model* g, Migration* plan,
   m->migrate(plan);
   double t1 = PCU_Time();
   if (!PCU_Comm_Self())
-    printf("mesh migrated from %d to %d in %f seconds\n",
+    lion_oprint(1,"mesh migrated from %d to %d in %f seconds\n",
         PCU_Comm_Peers() / factor,
         PCU_Comm_Peers(),
         t1 - t0);
@@ -867,9 +1036,22 @@ void deriveMdlFromManifold(Mesh2* mesh, bool* isModelVert,
                            GlobalToVert &globalToVert,
                            std::map<int, apf::MeshEntity*> &globalToRegion)
 {
-  apf::MeshTag* classifnTag = mesh->createIntTag("classifn_data", 2);
+  PCU_ALWAYS_ASSERT_VERBOSE(!mesh->findTag("_classifn_data"),
+          "MeshTag name \"_classifn_data\" is used internally in this method\n");
+  apf::MeshTag* classifnTag = mesh->createIntTag("_classifn_data", 2);
   int tagData[2], newTagData[2];
-  long minAvbl = 0;
+  long minAvbl = 1;
+  // This is set by during apf::construct, and using anything else leads to an
+  // additional region
+  long DEFAULT_REGION_ID = 0;
+
+  PCU_ALWAYS_ASSERT_VERBOSE(!mesh->findTag("_vert_id"),
+          "MeshTag name \"_vert_id\" is used internally in this method\n");
+  apf::MeshTag* vIDTag = mesh->createIntTag("_vert_id", 1);
+  for (apf::GlobalToVert::iterator vit = globalToVert.begin();
+       vit != globalToVert.end(); vit++) {
+    mesh->setIntTag(vit->second, vIDTag, &(vit->first));
+  }
 
   // Reserve tags used for model faces
   for (int i = 0; i < nBFaces ; ++i) {
@@ -879,7 +1061,7 @@ void deriveMdlFromManifold(Mesh2* mesh, bool* isModelVert,
   }
 
   // Set classifn tags for vertices
-  for (uint i = 0; i < mesh->count(0); ++i) {
+  for (size_t i = 0; i < mesh->count(0); ++i) {
     if (isModelVert[i]) {
       tagData[0] = 0;
       tagData[1] = minAvbl;
@@ -954,11 +1136,104 @@ void deriveMdlFromManifold(Mesh2* mesh, bool* isModelVert,
           m->getIntTag(ent, classifnTag, tagData);
           mds_update_model_for_entity(m->mesh, id, tagData[0], tagData[1]);
         } else {
-          mds_update_model_for_entity(m->mesh, id, 3, minAvbl);
+          mds_update_model_for_entity(m->mesh, id, m->getDimension(), 
+              DEFAULT_REGION_ID);
         }
       }
     }
   }
+
+  mesh->destroyTag(classifnTag);
+  mesh->destroyTag(vIDTag);
+}
+
+void derive2DMdlFromManifold(Mesh2* mesh, bool* isModelVert,
+			     int nBEdges, int (*bEdges)[4],
+			     GlobalToVert &globalToVert,
+			     std::map<int, apf::MeshEntity*> &globalToFace)
+{
+  PCU_ALWAYS_ASSERT_VERBOSE(!mesh->findTag("_classifn_data"),
+          "MeshTag name \"_classifn_data\" is used internally in this method\n");
+  apf::MeshTag* classifnTag = mesh->createIntTag("_classifn_data", 2);
+  int tagData[2], newTagData[2];
+  long minAvbl = 1;
+  // This is set by during apf::construct, and using anything else leads to an
+  // additional region
+  long DEFAULT_REGION_ID = 0;
+
+  PCU_ALWAYS_ASSERT_VERBOSE(!mesh->findTag("_vert_id"),
+          "MeshTag name \"_vert_id\" is used internally in this method\n");
+  apf::MeshTag* vIDTag = mesh->createIntTag("_vert_id", 1);
+  for (apf::GlobalToVert::iterator vit = globalToVert.begin();
+       vit != globalToVert.end(); vit++) {
+    mesh->setIntTag(vit->second, vIDTag, &(vit->first));
+  }
+
+  // Reserve tags used for model edges
+  for (int i = 0; i < nBEdges; ++i) {
+    // TODO: How to assert, when bEdges is already all integers?
+    minAvbl = (minAvbl <= bEdges[i][0]) ? (bEdges[i][0]+1) : minAvbl;
+    PCU_ALWAYS_ASSERT(minAvbl < std::numeric_limits<int>::max());
+  }
+
+  // Set classifn tags for vertices
+  for (size_t i = 0; i < mesh->count(0); ++i) {
+    if (isModelVert[i]) {
+      tagData[0] = 0;
+      tagData[1] = minAvbl;
+      minAvbl++;
+      mesh->setIntTag(globalToVert[i], classifnTag, tagData);
+    }
+  }
+
+  // Classification of boundary edges and their closure
+  apf::Downward edgesAdjToFace, vertsAdjToEdge;
+  int edgeIdInFace = 12;
+  for (int i = 0; i < nBEdges; ++i) {
+    mesh->getDownward(globalToFace[bEdges[i][1]], 1, edgesAdjToFace);
+    edgeIdInFace = getEdgeIdInFace(mesh, globalToFace[bEdges[i][1]], bEdges[i]);
+    apf::MeshEntity* edge = edgesAdjToFace[edgeIdInFace];
+    tagData[0] = newTagData[0] = 1;
+    tagData[1] = newTagData[1] = bEdges[i][0];
+    mesh->setIntTag(edge, classifnTag, tagData);
+
+    mesh->getDownward(edge, 0, vertsAdjToEdge);
+    for (int k = 0; k <2; ++k) {
+      if (mesh->hasTag(vertsAdjToEdge[k], classifnTag)) {
+	mesh->getIntTag(vertsAdjToEdge[k], classifnTag, tagData);
+        if (tagData[0] > newTagData[0]) {
+	  mesh->setIntTag(vertsAdjToEdge[k], classifnTag, newTagData);
+        }
+      } else {
+        // Vertex has no classification, use the edge's
+        mesh->setIntTag(vertsAdjToEdge[k], classifnTag, newTagData);
+      }
+    }
+  }
+
+  // TODO: Use classifnTag to classify
+  MeshMDS* m = static_cast<MeshMDS*>(mesh);
+  if ((classifnTag)) {
+    int tagData[2];
+    MeshEntity* ent;
+    mds_id id;
+    for (int dim = m->getDimension(); dim >= 0; --dim) {
+      apf::MeshIterator* it = m->begin(dim);
+      while ((ent = m->iterate(it))) {
+        id = fromEnt(ent);
+        if (m->hasTag(ent, classifnTag)) {
+          m->getIntTag(ent, classifnTag, tagData);
+          mds_update_model_for_entity(m->mesh, id, tagData[0], tagData[1]);
+        } else {
+          mds_update_model_for_entity(m->mesh, id, m->getDimension(),
+              DEFAULT_REGION_ID);
+        }
+      }
+    }
+  }
+
+  mesh->destroyTag(classifnTag);
+  mesh->destroyTag(vIDTag);
 }
 
 void changeMdsDimension(Mesh2* in, int d)

@@ -74,13 +74,14 @@ string(REGEX REPLACE
   "${SIM_VERSION}")
 
 set(MIN_VALID_SIM_VERSION 11.0.170826)
-set(MAX_VALID_SIM_VERSION 12.0.170912)
+set(MAX_VALID_SIM_VERSION 12.0.181124)
 if( (SIM_DOT_VERSION VERSION_LESS MIN_VALID_SIM_VERSION) OR
     (SIM_DOT_VERSION VERSION_GREATER MAX_VALID_SIM_VERSION) )
   MESSAGE(FATAL_ERROR 
     "invalid Simmetrix version: ${SIM_DOT_VERSION}, \
     valid versions are ${MIN_VALID_SIM_VERSION} to ${MAX_VALID_SIM_VERSION}")
 endif()
+message(STATUS "Building with SimModSuite ${SIM_DOT_VERSION}")
 
 set(SIMMODSUITE_LIBS "")
 
@@ -96,7 +97,7 @@ math(EXPR len "${archEnd}-${archStart}")
 string(SUBSTRING "${SIMMODSUITE_LIBS}" "${archStart}" "${len}" SIM_ARCHOS)
 message(STATUS "SIM_ARCHOS ${SIM_ARCHOS}")
 
-set(SIM_PARASOLID_VERSION 280)
+set(SIM_PARASOLID_VERSION 290)
 option(SIM_PARASOLID "Use Parasolid through Simmetrix" OFF)
 if (SIM_PARASOLID)
   getSimCadLib("${SIMMODSUITE_INSTALL_DIR}/lib/${SIM_ARCHOS}" 
@@ -137,6 +138,11 @@ set(SIM_CORE_LIB_NAMES
   SimPartitionWrapper-${SIM_MPI})
 
 simLibCheck("${SIM_CORE_LIB_NAMES}" TRUE)
+
+if (UNIX AND NOT APPLE)
+  find_package(Threads REQUIRED)
+  set(SIMMODSUITE_LIBS ${SIMMODSUITE_LIBS} ${CMAKE_THREAD_LIBS_INIT})
+endif()
 
 include(FindPackageHandleStandardArgs)
 # handle the QUIETLY and REQUIRED arguments and set SIMMODSUITE_FOUND to TRUE

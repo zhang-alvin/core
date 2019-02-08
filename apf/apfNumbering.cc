@@ -12,6 +12,7 @@
 #include "apfMesh.h"
 #include "apfShape.h"
 #include "apfTagData.h"
+#include "apfVtk.h"
 #include <pcu_util.h>
 
 namespace apf {
@@ -172,6 +173,12 @@ const char* getName(Numbering* n)
   return n->getName();
 }
 
+bool isPrintable(Numbering* f)
+{
+  FieldBase* f2 = f;
+  return isPrintable(f2);
+}
+
 Mesh* getMesh(Numbering* n)
 {
   return n->getMesh();
@@ -210,9 +217,9 @@ int countFixed(Numbering* n)
   return num_fixed;
 }
 
-void synchronize(Numbering * n, Sharing* shr)
+void synchronize(Numbering * n, Sharing* shr, bool delete_shr)
 {
-  synchronizeFieldData<int>(n->getData(), shr);
+  synchronizeFieldData<int>(n->getData(), shr, delete_shr);
 }
 
 struct NoSharing : public Sharing
@@ -461,6 +468,14 @@ GlobalNumbering* createGlobalNumbering(
   return n;
 }
 
+GlobalNumbering* createGlobalNumbering(Field* f)
+{
+  GlobalNumbering* n = new GlobalNumbering();
+  n->init(f);
+  f->getMesh()->addGlobalNumbering(n);
+  return n;
+}
+
 FieldShape* getShape(GlobalNumbering* n)
 {
   return n->getShape();
@@ -469,6 +484,12 @@ FieldShape* getShape(GlobalNumbering* n)
 const char* getName(GlobalNumbering* n)
 {
   return n->getName();
+}
+
+bool isPrintable(GlobalNumbering* f)
+{
+  FieldBase* f2 = f;
+  return isPrintable(f2);
 }
 
 Mesh* getMesh(GlobalNumbering* n)
@@ -601,5 +622,5 @@ void getNodes(GlobalNumbering* n, DynamicArray<Node>& nodes)
   getFieldNodes(n,nodes);
 }
 
+Field* getField(GlobalNumbering* n) { return n->getField(); }
 }
-

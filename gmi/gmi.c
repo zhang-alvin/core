@@ -8,6 +8,7 @@
 
 *******************************************************************************/
 #include "gmi.h"
+#include <lionPrint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pcu_util.h>
@@ -83,6 +84,16 @@ struct gmi_set* gmi_adjacent(struct gmi_model* m, struct gmi_ent* e, int dim)
 int gmi_can_eval(struct gmi_model* m)
 {
   return m->ops->eval != NULL;
+}
+
+int gmi_can_get_closest_point(struct gmi_model* m)
+{
+  return m->ops->closest_point != NULL;
+}
+
+int gmi_has_normal(struct gmi_model* m)
+{
+  return m->ops->normal != NULL;
 }
 
 void gmi_eval(struct gmi_model* m, struct gmi_ent* e,
@@ -206,7 +217,7 @@ struct gmi_model* gmi_load(const char* filename)
 
 void gmi_fail(const char* why)
 {
-  fprintf(stderr,"gmi failed: %s\n",why);
+  lion_eprint(1,"gmi failed: %s\n",why);
   abort();
 }
 

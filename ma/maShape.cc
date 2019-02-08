@@ -1,11 +1,12 @@
-/****************************************************************************** 
 
-  Copyright 2013 Scientific Computation Research Center, 
+/******************************************************************************
+
+  Copyright 2013 Scientific Computation Research Center,
       Rensselaer Polytechnic Institute. All rights reserved.
-  
+
   The LICENSE file included with this distribution describes the terms
   of the SCOREC Non-Commercial License this program is distributed under.
- 
+
 *******************************************************************************/
 #include <PCU.h>
 #include "maShape.h"
@@ -15,8 +16,10 @@
 #include "maOperator.h"
 #include "maEdgeSwap.h"
 #include "maDoubleSplitCollapse.h"
+#include "maFaceSplitCollapse.h"
 #include "maShortEdgeRemover.h"
 #include "maShapeHandler.h"
+#include "maBalance.h"
 #include "maDBG.h"
 #include <pcu_util.h>
 
@@ -197,6 +200,7 @@ class ShortEdgeFixer : public Operator
     SizeField* sizeField;
     ShortEdgeRemover remover;
     double shortEdgeRatio;
+  public:
     int nr;
     int nf;
 };
@@ -281,14 +285,22 @@ class FixBySwap : public TetFixerBase
 class FaceVertFixer : public TetFixerBase
 {
   public:
-    FaceVertFixer(Adapt* a)
+    FaceVertFixer(Adapt* a):
+      faceSplitCollapse(a)
     {
       mesh = a->mesh;
       edgeSwap = makeEdgeSwap(a);
-      nes = nf = 0;
+      nes = nf = nfsc = 0;
       edges[0] = 0;
       edges[1] = 0;
       edges[2] = 0;
+      verts[0] = 0;
+      verts[1] = 0;
+      verts[2] = 0;
+      verts[3] = 0;
+      face = 0;
+      oppVert = 0;
+      tet = 0;
     }
     ~FaceVertFixer()
     {
@@ -300,10 +312,18 @@ class FaceVertFixer : public TetFixerBase
    are too close, the key edges are those that bound
    face v(0,1,2) */
       apf::findTriDown(mesh,v,edges);
+      tet = apf::findElement(mesh, apf::Mesh::TET, v);
+      oppVert = v[3];
+      verts[0] = v[0];
+      verts[1] = v[1];
+      verts[2] = v[2];
+      verts[3] = v[3];
     }
     virtual bool requestLocality(apf::CavityOp* o)
     {
-      return o->requestLocality(edges,3);
+      /* by requesting locality for all the verts we can be sure
+       * that all the desired entities for this operator are local */
+      return o->requestLocality(verts,4);
     }
     virtual bool run()
     {
@@ -313,15 +333,27 @@ class FaceVertFixer : public TetFixerBase
           ++nes;
           return true;
         }
+      face = apf::findUpward(mesh, apf::Mesh::TRIANGLE, edges);
+      if (faceSplitCollapse.run(face, tet))
+      {
+        ++nfsc;
+        return true;
+      }
       ++nf;
       return false;
     }
   private:
     Mesh* mesh;
     Entity* edges[3];
+    Entity* verts[4];
+    Entity *face, *oppVert;
+    Entity* tet;
+    FaceSplitCollapse faceSplitCollapse;
     EdgeSwap* edgeSwap;
-    int nes;
-    int nf;
+  public:
+    int nes; /* number of edge swaps done */
+    int nfsc; /* number of FSCs done */
+    int nf; /* number of failures */
 };
 
 class EdgeEdgeFixer : public TetFixerBase
@@ -358,7 +390,7 @@ class EdgeEdgeFixer : public TetFixerBase
     virtual bool run()
     {
       for (int i=0; i < 2; ++i)
-        if (edgeSwap->run(edges[i]))
+	if (edgeSwap->run(edges[i]))
         {
           ++nes;
           return true;
@@ -376,10 +408,11 @@ class EdgeEdgeFixer : public TetFixerBase
     Entity* edges[2];
     EdgeSwap* edgeSwap;
     DoubleSplitCollapse doubleSplitCollapse;
+    SizeField* sf;
+  public:
     int nes;
     int ndsc;
     int nf;
-    SizeField* sf;
 };
 
 class LargeAngleTetFixer : public Operator
@@ -431,9 +464,10 @@ class LargeAngleTetFixer : public Operator
     Adapt* adapter;
     Mesh* mesh;
     Entity* tet;
+    TetFixerBase* fixer;
+  public:
     EdgeEdgeFixer edgeEdgeFixer;
     FaceVertFixer faceVertFixer;
-    TetFixerBase* fixer;
 };
 
 class LargeAngleTetAligner : public Operator
@@ -555,10 +589,58 @@ class LargeAngleTriFixer : public Operator
     int nf;
 };
 
-static void fixShortEdgeElements(Adapt* a)
+class QualityImprover2D : public Operator
 {
+  public:
+    QualityImprover2D(Adapt* a)
+    {
+      adapter = a;
+      mesh = a->mesh;
+      edgeSwap = makeEdgeSwap(a);
+      ns = nf = 0;
+      edge = 0;
+    }
+    virtual ~QualityImprover2D()
+    {
+      delete edgeSwap;
+    }
+    virtual int getTargetDimension() {return 1;}
+    virtual bool shouldApply(Entity* e)
+    {
+      if ( getFlag(adapter,e,DONT_SWAP))
+        return false;
+      edge = e;
+      return true;
+    }
+    virtual bool requestLocality(apf::CavityOp* o)
+    {
+      return o->requestLocality(&edge,1);
+    }
+    virtual void apply()
+    {
+      if (edgeSwap->run(edge))
+      {
+	++ns;
+	return;
+      }
+      ++nf;
+    }
+  private:
+    Adapt* adapter;
+    Mesh* mesh;
+    Entity* edge;
+    EdgeSwap* edgeSwap;
+    int ns;
+    int nf;
+};
+
+static double fixShortEdgeElements(Adapt* a)
+{
+  double t0 = PCU_Time();
   ShortEdgeFixer fixer(a);
   applyOperator(a,&fixer);
+  double t1 = PCU_Time();
+  return t1 - t0;
 }
 
 static void fixLargeAngleTets(Adapt* a)
@@ -585,12 +667,21 @@ static void alignLargeAngleTris(Adapt* a)
   applyOperator(a,&aligner);
 }
 
-static void fixLargeAngles(Adapt* a)
+static void improveQualities2D(Adapt* a)
 {
+  QualityImprover2D improver(a);
+  applyOperator(a, &improver);
+}
+
+static double fixLargeAngles(Adapt* a)
+{
+  double t0 = PCU_Time();
   if (a->mesh->getDimension()==3)
     fixLargeAngleTets(a);
   else
     fixLargeAngleTris(a);
+  double t1 = PCU_Time();
+  return t1 - t0;
 }
 
 static void alignLargeAngles(Adapt* a)
@@ -601,6 +692,17 @@ static void alignLargeAngles(Adapt* a)
     alignLargeAngleTris(a);
 }
 
+double improveQualities(Adapt* a)
+{
+  double t0 = PCU_Time();
+  if (a->mesh->getDimension() == 3)
+    return 0; // TODO: implement this for 3D
+  else
+    improveQualities2D(a);
+  double t1 = PCU_Time();
+  return t1 - t0;
+}
+
 void fixElementShapes(Adapt* a)
 {
   if ( ! a->input->shouldFixShape)
@@ -609,11 +711,14 @@ void fixElementShapes(Adapt* a)
   int count = markBadQuality(a);
   int originalCount = count;
   int prev_count;
+  double time;
+  int iter = 0;
   do {
     if ( ! count)
       break;
     prev_count = count;
-    fixLargeAngles(a);
+    print("--iter %d of shape correction loop: #bad elements %d", iter, count);
+    time = fixLargeAngles(a);
     /* We need to snap the new verts as soon as they are
      * created (to avoid future problems). At the moment
      * new verts are created only during 3D mesh adapt, so
@@ -621,11 +726,18 @@ void fixElementShapes(Adapt* a)
      */
     if (a->mesh->getDimension() == 3)
       snap(a);
-    markBadQuality(a);
-    fixShortEdgeElements(a);
     count = markBadQuality(a);
+    print("--fixLargeAngles       in %f seconds: #bad elements %d",time,count);
+    time = fixShortEdgeElements(a);
+    count = markBadQuality(a);
+    print("--fixShortEdgeElements in %f seconds: #bad elements %d",time,count);
     if (count >= prev_count)
       unMarkBadQuality(a); // to make sure markEntities does not complain!
+    // balance the mesh to avoid empty parts
+    midBalance(a);
+    print("--percent change in number of bad elements %f",
+	((double) prev_count - (double) count) / (double) prev_count);
+    iter++;
   } while(count < prev_count);
   double t1 = PCU_Time();
   print("bad shapes down from %d to %d in %f seconds",

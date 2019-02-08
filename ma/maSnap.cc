@@ -12,10 +12,13 @@
 #include "maAdapt.h"
 #include "maOperator.h"
 #include "maSnapper.h"
+#include "maMatchedSnapper.h"
 #include "maLayer.h"
 #include "maMatch.h"
+#include "maDBG.h"
 #include <apfGeometry.h>
 #include <pcu_util.h>
+#include <lionPrint.h>
 #include <iostream>
 #include <algorithm>
 
@@ -528,7 +531,7 @@ void interpolateParametricCoordinates(
   else if (md == 2)
     interpolateParametricCoordinatesOnFace(m, g, t, a, b, p);
   else
-    printf("model entity must be an edge or a face\n");
+    lion_oprint(1,"model entity must be an edge or a face\n");
 }
 
 static void transferParametricBetween(
@@ -558,6 +561,27 @@ void transferParametricOnEdgeSplit(
   ma::transferParametricBetween(m, g, ev, t, p);
 }
 
+void transferParametricOnTriSplit(
+    Mesh* m,
+    Entity* face,
+    const Vector& xi,
+    Vector& param)
+{
+  Model* g = m->toModel(face);
+  int modelDimension = m->getModelType(g);
+  if (m->getDimension() == 3 && modelDimension == 3) return;
+  Entity* tv[3];
+  m->getDownward(face, 0, tv);
+  Vector ep[3], pTemp;
+  for (int i = 0; i < 3; ++i) {
+    m->getParamOn(g, tv[i], ep[i]);
+  }
+  // TODO: Might be missing some cases here
+  for (int d = 0; d < modelDimension; ++d) {
+    param[d] = xi[0]*ep[0][d] + xi[1]*ep[1][d] + xi[2]*ep[2][d];
+  }
+}
+
 void transferParametricOnQuadSplit(
     Mesh* m,
     Entity* quad,
@@ -572,6 +596,79 @@ void transferParametricOnQuadSplit(
   Entity* v[2];
   v[0] = v01; v[1] = v32;
   ma::transferParametricBetween(m, g, v, y, p);
+}
+
+void getClosestPointParametricCoordinates(
+    apf::Mesh* m,
+    Model* g,
+    double t,
+    Vector const& a,
+    Vector const& b,
+    Vector& p)
+{
+  Vector testPt = a * (1 - t) + b * t;
+  Vector targetPt;
+  m->getClosestPoint(g, testPt, targetPt, p);
+  (void) targetPt;
+}
+
+void transferToClosestPointOnEdgeSplit(
+    Mesh* m,
+    Entity* e,
+    double t,
+    Vector& p)
+{
+  Model* g = m->toModel(e);
+  int modelDimension = m->getModelType(g);
+  if (m->getDimension()==3 && modelDimension==3) return;
+  Entity* ev[2];
+  m->getDownward(e,0,ev);
+  Vector a = getPosition(m, ev[0]);
+  Vector b = getPosition(m, ev[1]);
+  getClosestPointParametricCoordinates(m, g, t, a, b, p);
+}
+
+void transferToClosestPointOnTriSplit(
+    Mesh* m,
+    Entity* face,
+    const Vector& xi,
+    Vector& param)
+{
+  Model* g = m->toModel(face);
+  int modelDimension = m->getModelType(g);
+  if (m->getDimension() == 3 && modelDimension == 3) return;
+  Entity* tv[3];
+  m->getDownward(face, 0, tv);
+  Vector x[3];
+
+  for (int i = 0; i < 3; i++) {
+    x[i] = getPosition(m, tv[i]);
+  }
+
+  Vector testPt = x[0] * xi[0] + x[1] * xi[1] + x[2] * xi[2];
+  Vector targetPt;
+
+  m->getClosestPoint(g, testPt, targetPt, param);
+  (void) targetPt;
+}
+
+void transferToClosestPointOnQuadSplit(
+    Mesh* m,
+    Entity* quad,
+    Entity* v01,
+    Entity* v32,
+    double y,
+    Vector& p)
+{
+  Model* g = m->toModel(quad);
+  int modelDimension = m->getModelType(g);
+  if (modelDimension==m->getDimension()) return;
+  Vector a = getPosition(m, v01);
+  Vector b = getPosition(m, v32);
+  Vector testPt = a * (1 - y) + b * y;
+  Vector targetPt;
+  m->getClosestPoint(g, testPt, targetPt, p);
+  (void) targetPt;
 }
 
 static void getSnapPoint(Mesh* m, Entity* v, Vector& x)
@@ -601,11 +698,12 @@ class SnapAll : public Operator
       if ( ! getFlag(adapter, e, SNAP))
         return false;
       vert = e;
+      snapper.setVert(e);
       return true;
     }
     bool requestLocality(apf::CavityOp* o)
     {
-      return snapper.setVert(vert, o);
+      return snapper.requestLocality(o);
     }
     void apply()
     {
@@ -624,6 +722,65 @@ class SnapAll : public Operator
     Snapper snapper;
 };
 
+bool snapAllVerts(Adapt* a, Tag* t, bool isSimple, long& successCount)
+{
+  SnapAll op(a, t, isSimple);
+  applyOperator(a, &op);
+  successCount += PCU_Add_Long(op.successCount);
+  return PCU_Or(op.didAnything);
+}
+
+class SnapMatched : public Operator
+{
+  public:
+    SnapMatched(Adapt* a, Tag* t, bool simple):
+      snapper(a, t, simple)
+    {
+      adapter = a;
+      tag = t;
+      successCount = 0;
+      didAnything = false;
+      vert = 0;
+    }
+    int getTargetDimension() {return 0;}
+    bool shouldApply(Entity* e)
+    {
+      if ( ! getFlag(adapter, e, SNAP))
+        return false;
+      vert = e;
+      snapper.setVert(e);
+      return true;
+    }
+    bool requestLocality(apf::CavityOp* o)
+    {
+      return snapper.requestLocality(o);
+    }
+    void apply()
+    {
+      snapper.setVerts();
+      bool snapped = snapper.trySnaps();
+      didAnything = didAnything || snapped;
+      if (snapped)
+        ++successCount;
+      clearFlagMatched(adapter, vert, SNAP);
+    }
+    int successCount;
+    bool didAnything;
+  private:
+    Adapt* adapter;
+    Tag* tag;
+    Entity* vert;
+    MatchedSnapper snapper;
+};
+
+bool snapMatchedVerts(Adapt* a, Tag* t, bool isSimple, long& successCount)
+{
+  SnapMatched op(a, t, isSimple);
+  applyOperator(a, &op);
+  successCount += PCU_Add_Long(op.successCount);
+  return PCU_Or(op.didAnything);
+}
+
 long tagVertsToSnap(Adapt* a, Tag*& t)
 {
   Mesh* m = a->mesh;
@@ -639,7 +796,7 @@ long tagVertsToSnap(Adapt* a, Tag*& t)
     Vector s;
     getSnapPoint(m, v, s);
     Vector x = getPosition(m, v);
-    if (apf::areClose(s, x, 0.0))
+    if (apf::areClose(s, x, 1e-12))
       continue;
     m->setDoubleTag(v, t, &s[0]);
     if (m->isOwned(v))
@@ -658,26 +815,32 @@ static void markVertsToSnap(Adapt* a, Tag* t)
 bool snapOneRound(Adapt* a, Tag* t, bool isSimple, long& successCount)
 {
   markVertsToSnap(a, t);
-  SnapAll op(a, t, isSimple);
-  applyOperator(a, &op);
-  successCount += PCU_Add_Long(op.successCount);
-  return PCU_Or(op.didAnything);
+  if (a->mesh->hasMatching())
+    return snapMatchedVerts(a, t, isSimple, successCount);
+  else
+    return snapAllVerts(a, t, isSimple, successCount);
 }
 
 long snapTaggedVerts(Adapt* a, Tag* tag)
 {
   long successCount = 0;
-  /* first snap all the vertices we can without digging.
-     This is fast because it uses just the elements around
-     the vertex and doesn't think much, it should also handle
-     the vast majority of vertices */
-  while (snapOneRound(a, tag, true, successCount));
-  /* all the remaining vertices now need some kind of modification
-     in order to snap.
-     Here we turn on the "try digging before snapping" flag,
-     which requires two-layer cavities so hopefully fewer vertices
-     are involved here */
+  /* there are two approaches possible here:
+   * 1- first snap all the vertices we can without any additional
+   * operation such as digging (simple snap). And then try snapping
+   * the remaining vertices that will need extra modifications (non-
+   * simple snap).
+   * 2- first do the non-simple snaps and then the simple snaps.
+   *
+   * Here we choose approach 2 for the following reasons
+   * (a) approach 2 is approximately as fast as approach 1
+   * (b) the problematic snaps will be attempted as soon as possible.
+   * This is extremely helpful because if we wait until later on
+   * bringing the vert to-be-snapped to the boundary might become more
+   * difficult due to the change in location of neighboring verticies
+   * that will be snapped before the problematic vert to-be-snapped.
+   */
   while (snapOneRound(a, tag, false, successCount));
+  while (snapOneRound(a, tag, true, successCount));
   return successCount;
 }
 
