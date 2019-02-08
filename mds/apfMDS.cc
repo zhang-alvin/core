@@ -577,6 +577,14 @@ class MeshMDS : public Mesh2
       if (!PCU_Comm_Self())
         printf("mesh %s written in %f seconds\n", fileName, t1 - t0);
     }
+    void writeNative_direct(const char* fileName)
+    {
+      double t0 = PCU_Time();
+      mesh = mds_write_smb_direct(mesh, fileName, 0, this);
+      double t1 = PCU_Time();
+      if (!PCU_Comm_Self())
+        printf("mesh %s written in %f seconds\n", fileName, t1 - t0);
+    }
     void destroyNative()
     {
       while (this->countFields())

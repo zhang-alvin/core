@@ -769,3 +769,14 @@ struct mds_apf* mds_write_smb(struct mds_apf* m, const char* pathname,
   return m;
 }
 
+struct mds_apf* mds_write_smb_direct(struct mds_apf* m, const char* pathname,
+    int ignore_peers, void* apf_mesh)
+{
+  char* filename;
+  int zip;
+  filename = handle_path(pathname, 1, &zip, ignore_peers);
+  write_smb(m, filename, zip, ignore_peers, apf_mesh);
+  free(filename);
+  return m;
+}
+
