@@ -18,6 +18,8 @@
 #include "maLayer.h"
 #include "maDBG.h"
 #include <pcu_util.h>
+#include <cstdlib>
+#include <iostream>
 
 namespace ma {
 
@@ -51,13 +53,33 @@ void adapt(Input* in)
   apf::printStats(m);
 }
 
+void checkEmpty(apf::Mesh* m)
+{
+  int numElements = m->count(m->getDimension());
+  int numVertices = m->count(0);
+  if(numElements == 0 )
+  {
+    std::cerr << "Element count reached 0\n";
+    std::exit(EXIT_FAILURE);
+  }
+  else if(numVertices == 0 )
+  {
+    
+    std::cerr << "Vertex count reached 0\n";
+    std::exit(EXIT_FAILURE);
+  }
+  return;
+}
+
 void adaptVerbose(Input* in, bool verbose)
 {
   print("version 2.0 - dev !");
   double t0 = PCU_Time();
   validateInput(in);
   Adapt* a = new Adapt(in);
+ 
   preBalance(a);
+  checkEmpty(a->mesh);
   for (int i = 0; i < in->maximumIterations; ++i)
   {
     print("iteration %d",i);
@@ -66,6 +88,7 @@ void adaptVerbose(Input* in, bool verbose)
       ma_dbg::dumpMeshWithQualities(a,i,"after_coarsen");
     coarsenLayer(a);
     midBalance(a);
+    checkEmpty(a->mesh);
     refine(a);
     if (verbose)
       ma_dbg::dumpMeshWithQualities(a,i,"after_refine");
@@ -106,6 +129,7 @@ void adaptVerbose(Input* in, bool verbose)
   tetrahedronize(a);
   printQuality(a);
   postBalance(a);
+  checkEmpty(a->mesh);
   Mesh* m = a->mesh;
   delete a;
   delete in;
