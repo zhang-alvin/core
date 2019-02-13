@@ -103,9 +103,11 @@ static void runBalancer(Adapt* a, apf::Balancer* b)
 
 void runZoltan(Adapt* a, int method=apf::GRAPH)
 {
+  std::cerr<<"entering balancer\n";
   runBalancer(a, apf::makeZoltanBalancer(
         a->mesh, method, apf::REPARTITION,
         /* debug = */ false));
+  std::cerr<<"exiting balancer\n";
 }
 
 void runParma(Adapt* a)
