@@ -78,7 +78,9 @@ void adaptVerbose(Input* in, bool verbose)
   validateInput(in);
   Adapt* a = new Adapt(in);
  
+  //std::cerr<"Entering preBalance\n";
   preBalance(a);
+  //std::cerr<"Exiting preBalance\n";
   checkEmpty(a->mesh);
   for (int i = 0; i < in->maximumIterations; ++i)
   {
@@ -87,8 +89,8 @@ void adaptVerbose(Input* in, bool verbose)
     if (verbose && in->shouldCoarsen)
       ma_dbg::dumpMeshWithQualities(a,i,"after_coarsen");
     coarsenLayer(a);
-    midBalance(a);
     checkEmpty(a->mesh);
+    midBalance(a);
     refine(a);
     if (verbose)
       ma_dbg::dumpMeshWithQualities(a,i,"after_refine");
