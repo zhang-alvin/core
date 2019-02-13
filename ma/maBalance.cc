@@ -3,6 +3,7 @@
 #include "maAdapt.h"
 #include <parma.h>
 #include <apfZoltan.h>
+#include <iostream>
 
 namespace ma {
 
