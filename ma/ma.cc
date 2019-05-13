@@ -19,6 +19,8 @@
 #include "maDBG.h"
 #include <pcu_util.h>
 
+#include "maEdgeSwap.h"
+
 namespace ma {
 
 void adapt(Input* in)
@@ -50,6 +52,22 @@ void adapt(Input* in)
   print("mesh adapted in %f seconds",t1-t0);
   apf::printStats(m);
 }
+
+void adaptSwap(Input* in,apf::MeshEntity* edgeForSwap)
+{
+  print("version 2.0 !");
+  validateInput(in);
+  Adapt* a = new Adapt(in);
+
+  EdgeSwap* edgeSwap = makeEdgeSwap(a);
+  edgeSwap->run(edgeForSwap);
+  delete edgeSwap;
+
+  delete a;
+  delete in;
+}
+
+
 
 void adaptVerbose(Input* in, bool verbose)
 {
