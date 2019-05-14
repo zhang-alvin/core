@@ -60,7 +60,8 @@ void adaptSwap(Input* in,apf::MeshEntity* edgeForSwap)
   Adapt* a = new Adapt(in);
 
   EdgeSwap* edgeSwap = makeEdgeSwap(a);
-  edgeSwap->run(edgeForSwap);
+  //edgeSwap->run(edgeForSwap);
+  edgeSwap->run_special(edgeForSwap);
   delete edgeSwap;
 
   delete a;
