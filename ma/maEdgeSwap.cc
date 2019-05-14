@@ -426,7 +426,8 @@ class EdgeSwap2D : public EdgeSwap
       makeNewFaces();
       cavity.afterBuilding();
       cavity.fit(oldFaces);
-      if ( ! didImproveQuality() || didBreakGeomConsistency() )
+      //if ( ! didImproveQuality() || didBreakGeomConsistency() )
+      if ( didBreakGeomConsistency() )
       {
         cancel();
         return false;
