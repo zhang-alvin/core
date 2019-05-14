@@ -21,6 +21,7 @@ class EdgeSwap
   public:
     virtual ~EdgeSwap() {};
     virtual bool run(Entity* edge) = 0;
+    virtual bool run_special(Entity* edge) = 0;
 };
 
 EdgeSwap* makeEdgeSwap(Adapt* a);

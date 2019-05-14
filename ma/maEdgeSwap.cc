@@ -426,8 +426,7 @@ class EdgeSwap2D : public EdgeSwap
       makeNewFaces();
       cavity.afterBuilding();
       cavity.fit(oldFaces);
-      //if ( ! didImproveQuality() || didBreakGeomConsistency() )
-      if ( didBreakGeomConsistency() )
+      if ( ! didImproveQuality() || didBreakGeomConsistency() )
       {
         cancel();
         return false;
@@ -437,6 +436,27 @@ class EdgeSwap2D : public EdgeSwap
       return true;
     }
     Entity** getOldFaces() { return &(oldFaces[0]); }
+
+    virtual bool run_special(Entity* e)
+    {
+      if (getFlag(adapter,e,DONT_SWAP))
+        return false;
+      if (isOnModelEdge(mesh,e))
+        return false;
+      if ( ! setEdge(e))
+        return false;
+      orient();
+      if (wouldInvert())
+        return false;
+      cavity.beforeBuilding();
+      makeNewFaces();
+      cavity.afterBuilding();
+      cavity.fit(oldFaces);
+      cavity.transfer(oldFaces);
+      destroyOldFaces();
+      return true;
+    }
+
   private:
     Adapt* adapter;
     Mesh* mesh;
@@ -778,6 +798,12 @@ class EdgeSwap3D : public EdgeSwap
       cavity.fit(oldTets);
       cavity.transfer(oldTets);
       destroyOldTets();
+      return true;
+    }
+    virtual bool run_special(Entity* e)
+    {
+      //dummy function to satisfy the prototype
+      isOnModelEdge(mesh,e);
       return true;
     }
   private:
